@@ -11,12 +11,12 @@ def hook(test_logger):
     return KeyboardHook(test_logger)
 
 
-def down(hook, key):
-    hook._handler(SimpleNamespace(name=key, event_type="down"))
+def down(hook, key, scan_code=None):
+    hook._handler(SimpleNamespace(name=key, event_type="down", scan_code=scan_code))
 
 
-def up(hook, key):
-    hook._handler(SimpleNamespace(name=key, event_type="up"))
+def up(hook, key, scan_code=None):
+    hook._handler(SimpleNamespace(name=key, event_type="up", scan_code=scan_code))
 
 
 def tap(hook, *keys):
@@ -124,6 +124,32 @@ def test_unregister_all_clears_hotkeys(conflicting_hook, fired):
     conflicting_hook.unregister_all()
     tap(conflicting_hook, "alt", "shift")
     assert fired == []
+
+
+def test_letter_key_matches_by_scan_code_when_layout_reports_other_name(hook, fired, monkeypatch):
+    # The physical G key arrives as 'п' with a Russian layout active — the
+    # hook must match it via the scan code bound at registration time.
+    monkeypatch.setattr("engine.keyboard_hook.keyboard.key_to_scan_codes", lambda key: (34,))
+    hook.register_hook(KeyCombination.from_hotkey_string("alt+shift"), fired.append, "carousel")
+    hook.register_hook(KeyCombination.from_hotkey_string("alt+shift+g"), fired.append, "greek")
+
+    down(hook, "alt")
+    down(hook, "shift")
+    down(hook, "п", scan_code=34)
+    up(hook, "п", scan_code=34)
+    up(hook, "shift")
+    up(hook, "alt")
+    assert fired == ["greek"]
+
+
+def test_name_matching_fallback_when_scan_codes_unavailable(hook, fired, monkeypatch):
+    def no_scan_codes(key):
+        raise ValueError(key)
+
+    monkeypatch.setattr("engine.keyboard_hook.keyboard.key_to_scan_codes", no_scan_codes)
+    hook.register_hook(KeyCombination.from_hotkey_string("ctrl+k"), fired.append, "combo")
+    tap(hook, "ctrl", "k")
+    assert fired == ["combo"]
 
 
 def test_callback_exception_does_not_break_hook(hook, fired):

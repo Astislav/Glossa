@@ -27,6 +27,7 @@ class KeyboardHook(KeyboardHookInterface):
         self._armed = set()       # deferred combos fully pressed, awaiting release
         self._suppressed = set()  # deferred combos beaten by a superset this hold
         self._hotkeys = set()
+        self._scan_code_to_key = {}
         self._hotkeys_to_callback = {}
         self._hook_handle = None
 
@@ -35,8 +36,23 @@ class KeyboardHook(KeyboardHookInterface):
         self._hotkeys.update(combo)
         self._hotkeys_to_callback[combo] = {'callback': callback, 'args': args}
 
+        # The `keyboard` library reports LAYOUT-DEPENDENT names for letter
+        # keys: the physical G key may arrive as 'g', 'п' or 'γ' depending on
+        # the active layout — a name-registered 'g' would silently never
+        # match. Bind non-modifier keys to their SCAN CODES (the physical
+        # key) instead; modifiers keep stable names on every layout.
+        for key in combo:
+            if key in self._MODIFIER_NAMES:
+                continue
+            try:
+                for scan_code in keyboard.key_to_scan_codes(key):
+                    self._scan_code_to_key[scan_code] = key
+            except (ValueError, KeyError):
+                self._log.warning("no scan codes for key '%s' — falling back to name matching", key)
+
     def unregister_all(self):
         self._hotkeys.clear()
+        self._scan_code_to_key.clear()
         self._hotkeys_to_callback.clear()
         self._pressed.clear()
         self._active.clear()
@@ -52,17 +68,21 @@ class KeyboardHook(KeyboardHookInterface):
             keyboard.unhook(self._hook_handle)
             self._hook_handle = None
 
+    _MODIFIER_NAMES = frozenset({'ctrl', 'alt', 'shift', 'windows'})
+
     def _handler(self, event: keyboard.KeyboardEvent):
         # This runs inside the low-level hook chain for EVERY keystroke in
         # the system — the common case (an unregistered key) must bail out
-        # with a couple of set lookups and no string allocations.
-        key = event.name
-        if key not in self._hotkeys:
-            if not (key.startswith('left ') or key.startswith('right ')):
-                return
-            key = key.split(' ', 1)[1]
+        # with a couple of lookups and no string allocations.
+        key = self._scan_code_to_key.get(event.scan_code)
+        if key is None:
+            key = event.name
             if key not in self._hotkeys:
-                return
+                if not (key.startswith('left ') or key.startswith('right ')):
+                    return
+                key = key.split(' ', 1)[1]
+                if key not in self._hotkeys:
+                    return
 
         if event.event_type == keyboard.KEY_DOWN:
             self._on_key_down(key)
