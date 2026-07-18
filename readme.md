@@ -1,6 +1,4 @@
-<img src="resources/logo.svg" width="88" align="right" alt="Glossa logo">
-
-# Glossa
+# <img src="resources/logo.svg" width="34" alt="" align="top"> Glossa
 
 **Your layout-switch hotkey cycles only the languages you choose. The rest
 get their own hotkeys.**
