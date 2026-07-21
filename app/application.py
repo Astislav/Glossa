@@ -1,5 +1,6 @@
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -67,7 +68,21 @@ class Application(ApplicationInterface):
         settings_window.settings_applied.connect(
             lambda: tray_icon.showMessage(self._env.APP_NAME, "Settings applied")
         )
+
+        # Windows shutdown/logoff kills a hidden tray app before exec()
+        # returns, so the ServiceRunner teardown below never runs and the
+        # system layout hotkeys stay disabled in the registry. commitDataRequest
+        # fires during the session-end handshake — restore them right there,
+        # synchronously (DirectConnection is required: a queued slot would
+        # never run before the process is killed).
+        app.commitDataRequest.connect(self._on_session_end, Qt.DirectConnection)
+
         tray_icon.show()
 
         with ServiceRunner(self._container, self.SERVICES):
             app.exec()
+
+    def _on_session_end(self, _session_manager):
+        # Idempotent: SystemHotkeysGuard.stop() no-ops if already restored,
+        # so the normal teardown re-running this later is harmless.
+        self._container.get(SystemHotkeysGuard).stop()

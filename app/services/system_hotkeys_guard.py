@@ -10,8 +10,12 @@ from engine.interfaces.keyboard_layout_switching_system_settings_interface impor
 @singleton
 class SystemHotkeysGuard(ServiceInterface):
     """Disables the Windows built-in layout-switch hotkeys for the app's
-    lifetime. ServiceRunner guarantees stop() on any exit, so the system
-    hotkeys are restored even when the app crashes."""
+    lifetime and restores them on exit — via ServiceRunner teardown on a
+    clean quit, and via the Application's session-end handler on Windows
+    shutdown/logoff. A hard kill (power loss, force-close) can't restore in
+    the moment, but the originals are backed up to disk, so the next run —
+    or the next clean quit — recovers them (see
+    WindowsKeyboardLayoutSwitchingSettings)."""
 
     @inject
     def __init__(
