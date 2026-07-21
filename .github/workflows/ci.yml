@@ -13,5 +13,3 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run pytest
-        env:
-          GLOSSA_WINDOWS_INTEGRATION: "1"  # runners are disposable — real-registry tests welcome

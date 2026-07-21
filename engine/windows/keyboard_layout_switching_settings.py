@@ -24,7 +24,7 @@ class WindowsKeyboardLayoutSwitchingSettings(KeyboardLayoutSwitchingSystemSettin
     _HWND_BROADCAST = 0xFFFF
     _SMTO_ABORTIFHUNG = 0x0002
 
-    def __init__(self):
+    def __init__(self, toggle_branch=None, backup_path=None):
         self._language_hot_key_id = None
         self._layout_hot_key_id = None
         self._user32 = ctypes.windll.user32
@@ -32,13 +32,17 @@ class WindowsKeyboardLayoutSwitchingSettings(KeyboardLayoutSwitchingSystemSettin
             wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
             wintypes.UINT, wintypes.UINT, ctypes.c_void_p,
         )
+        # Overridable so tests can point at a throwaway HKCU key instead of
+        # the real system branch.
+        self._toggle_branch = toggle_branch or self._layout_toggle_branch
         # Survives a hard kill: the original values are persisted before we
         # overwrite them, and a later run treats a leftover backup as the
         # true originals (RAM alone would lose them on crash/power loss).
-        self._backup_path = Path(Root.external("settings", "system_hotkeys_backup.json"))
+        self._backup_path = Path(backup_path) if backup_path else \
+            Path(Root.external("settings", "system_hotkeys_backup.json"))
 
     def disable_system_hotkeys(self):
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._layout_toggle_branch, 0, winreg.KEY_ALL_ACCESS) as k:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._toggle_branch, 0, winreg.KEY_ALL_ACCESS) as k:
             current = (
                 self._get_registry_value(k, self._language_hotkey_reg_name),
                 self._get_registry_value(k, self._layout_hotkey_reg_name),
@@ -53,18 +57,29 @@ class WindowsKeyboardLayoutSwitchingSettings(KeyboardLayoutSwitchingSystemSettin
         self._notify()
 
     def restore_system_hotkeys(self):
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._layout_toggle_branch, 0, winreg.KEY_ALL_ACCESS) as k:
-            if self._language_hot_key_id is not None:
-                winreg.SetValueEx(k, self._language_hotkey_reg_name, 0, winreg.REG_SZ, self._language_hot_key_id)
-
-            if self._layout_hot_key_id is not None:
-                winreg.SetValueEx(k, self._layout_hotkey_reg_name, 0, winreg.REG_SZ, self._layout_hot_key_id)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._toggle_branch, 0, winreg.KEY_ALL_ACCESS) as k:
+            self._write_or_delete(k, self._language_hotkey_reg_name, self._language_hot_key_id)
+            self._write_or_delete(k, self._layout_hotkey_reg_name, self._layout_hot_key_id)
 
         self._notify()
         self._backup_path.unlink(missing_ok=True)
 
+    @staticmethod
+    def _write_or_delete(key, name, value):
+        # A None original means the value was ABSENT before we touched it —
+        # restoring the original state means DELETING it, not leaving our "3".
+        # (On a machine with a single layout, the Toggle values don't exist;
+        # skipping the write used to leave the hotkeys disabled forever.)
+        if value is None:
+            try:
+                winreg.DeleteValue(key, name)
+            except FileNotFoundError:
+                pass
+        else:
+            winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+
     def system_switch_hotkey(self) -> KeyCombination | None:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._layout_toggle_branch) as k:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._toggle_branch) as k:
             value = self._get_registry_value(k, self._language_hotkey_reg_name)
 
         return self._hotkey_from_toggle_value(value)
